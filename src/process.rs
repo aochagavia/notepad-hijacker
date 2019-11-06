@@ -1,12 +1,13 @@
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
-use std::mem;
+use std::{mem, ptr};
 
 use winapi::ctypes::c_void;
-use winapi::shared::minwindef::{DWORD, FALSE};
+use winapi::shared::minwindef::{DWORD, LPVOID, LPCVOID, FALSE};
 use winapi::shared::ntdef::NULL;
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::errhandlingapi::GetLastError;
+use winapi::um::memoryapi::ReadProcessMemory;
 use winapi::um::psapi;
 use winapi::um::processthreadsapi::OpenProcess;
 use winapi::um::winnt;
@@ -36,6 +37,25 @@ impl Process {
         } else {
             Ok(Process { handle })
         }
+    }
+
+    pub fn read_byte_at_relative_address(&self, addr: usize) -> u8 {
+        let mut buffer = vec![0; 8];
+        let success = unsafe {
+            ReadProcessMemory(
+                self.handle,
+                addr as LPCVOID,
+                buffer.as_mut_ptr() as LPVOID,
+                buffer.len(),
+                ptr::null_mut()
+            )
+        };
+
+        if success == 0 {
+            panic!("Error reading bytes from process! Error code: {}", unsafe { GetLastError() });
+        }
+
+        buffer[0]
     }
 
     pub fn list_readable() -> Vec<Process> {
