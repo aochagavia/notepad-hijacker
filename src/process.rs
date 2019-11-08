@@ -3,17 +3,20 @@ use std::os::windows::ffi::OsStringExt;
 use std::{mem, ptr};
 
 use winapi::ctypes::c_void;
-use winapi::shared::minwindef::{DWORD, LPVOID, LPCVOID, FALSE};
+use winapi::shared::minwindef::{DWORD, LPVOID, LPCVOID, FALSE, HMODULE};
 use winapi::shared::ntdef::NULL;
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::memoryapi::ReadProcessMemory;
 use winapi::um::psapi;
+use winapi::um::psapi::{EnumProcessModules, GetModuleInformation, MODULEINFO};
 use winapi::um::processthreadsapi::OpenProcess;
 use winapi::um::winnt;
 
 pub struct Process {
     handle: *mut c_void,
+    pub pid: u32,
+    pub base_address: u64,
 }
 
 impl Drop for Process {
@@ -32,15 +35,16 @@ impl Process {
             )
         };
 
+
         if handle == NULL {
             Err(unsafe { GetLastError() })
         } else {
-            Ok(Process { handle })
+            let base_address = get_base_address(handle);
+            Ok(Process { handle, pid, base_address })
         }
     }
 
-    pub fn read_byte_at_relative_address(&self, addr: usize) -> u8 {
-        let mut buffer = vec![0; 8];
+    pub fn read_memory(&self, buffer: &mut [u8], addr: u64) {
         let success = unsafe {
             ReadProcessMemory(
                 self.handle,
@@ -54,8 +58,6 @@ impl Process {
         if success == 0 {
             panic!("Error reading bytes from process! Error code: {}", unsafe { GetLastError() });
         }
-
-        buffer[0]
     }
 
     pub fn list_readable() -> Vec<Process> {
@@ -82,6 +84,50 @@ impl Process {
 
         OsString::from_wide(&buffer)
     }
+}
+
+fn get_base_address(handle: *mut c_void) -> u64 {
+    let mut module_handles: Vec<HMODULE> = vec![ptr::null_mut(); 1];
+    let mut bytes_written = 0u32;
+    let success = unsafe {
+        EnumProcessModules(
+            handle,
+            module_handles.as_mut_ptr(),
+            (module_handles.len() * mem::size_of::<HMODULE>()) as u32,
+            &mut bytes_written as *mut _,
+        )
+    };
+
+    if success == 0 {
+        panic!("Error getting module handles from process! Error code: {}", unsafe { GetLastError() });
+    }
+
+    if bytes_written == 0 {
+        panic!("No module handles retrieved!")
+    }
+
+    let module_handle = module_handles[0];
+
+    let mut module_info = MODULEINFO {
+        lpBaseOfDll: ptr::null_mut(),
+        SizeOfImage: 0,
+        EntryPoint: ptr::null_mut(),
+    };
+
+    let success = unsafe {
+        GetModuleInformation(
+            handle,
+            module_handle,
+            &mut module_info as *mut _,
+            mem::size_of_val(&module_info) as u32,
+        )
+    };
+
+    if success == 0 {
+        panic!("Error getting module info from process! Error code: {}", unsafe { GetLastError() });
+    }
+
+    module_info.lpBaseOfDll as u64
 }
 
 fn list_all_pids() -> Vec<u32> {
