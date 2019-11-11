@@ -7,7 +7,7 @@ use winapi::shared::minwindef::{DWORD, LPVOID, LPCVOID, FALSE, HMODULE};
 use winapi::shared::ntdef::NULL;
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::errhandlingapi::GetLastError;
-use winapi::um::memoryapi::ReadProcessMemory;
+use winapi::um::memoryapi::{ReadProcessMemory, WriteProcessMemory};
 use winapi::um::psapi;
 use winapi::um::psapi::{EnumProcessModules, GetModuleInformation, MODULEINFO};
 use winapi::um::processthreadsapi::OpenProcess;
@@ -29,7 +29,7 @@ impl Process {
     pub fn new(pid: u32) -> Result<Process, u32> {
         let handle = unsafe {
             OpenProcess(
-                winnt::PROCESS_QUERY_INFORMATION | winnt::PROCESS_VM_READ,
+                winnt::PROCESS_QUERY_INFORMATION | winnt::PROCESS_VM_READ | winnt::PROCESS_VM_WRITE,
                 FALSE,
                 pid,
             )
@@ -48,7 +48,7 @@ impl Process {
         let success = unsafe {
             ReadProcessMemory(
                 self.handle,
-                addr as LPCVOID,
+                addr as LPVOID,
                 buffer.as_mut_ptr() as LPVOID,
                 buffer.len(),
                 ptr::null_mut()
@@ -57,6 +57,22 @@ impl Process {
 
         if success == 0 {
             panic!("Error reading bytes from process! Error code: {}", unsafe { GetLastError() });
+        }
+    }
+
+    pub fn write_memory(&self, buffer: &[u8], addr: u64) {
+        let success = unsafe {
+            WriteProcessMemory(
+                self.handle,
+                addr as LPVOID,
+                buffer.as_ptr() as LPCVOID,
+                buffer.len(),
+                ptr::null_mut()
+            )
+        };
+
+        if success == 0 {
+            panic!("Error writing bytes to process! Error code: {}", unsafe { GetLastError() });
         }
     }
 
